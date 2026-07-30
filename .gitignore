@@ -58,7 +58,6 @@ temp/
 *.seed
 
 # Uploads (if generated at runtime)
-uploads/
 
 # Prisma (only if generated locally)
 prisma/dev.db
