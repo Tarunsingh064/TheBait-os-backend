@@ -33,8 +33,10 @@ export class SubscriptionsService {
    * boolean check so Clients/Invoices/Contracts/Meetings never have to know
    * about Subscription's internal shape, just "yes/no, are they paying."
    */
-  async isActive(agencyId: string): Promise<boolean> {
-    const sub = await this.subscriptionModel.findOne({ agencyId }).lean();
+   async isActive(agencyId: string): Promise<boolean> {
+    const sub = await this.subscriptionModel
+      .findOne({ agencyId: new Types.ObjectId(agencyId) })
+      .lean();
     return sub?.status === 'active';
   }
 

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as fontkit from '@pdf-lib/fontkit';
 import { Invoice, InvoiceDocument } from '../schemas/invoice.schema';
+import { InvoiceCounter, InvoiceCounterDocument } from '../schemas/invoice-counter.schema';
 import { Agency, AgencyDocument } from '../schemas/agency.schema';
 import { User, UserDocument } from '../schemas/user.schema';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -22,6 +23,7 @@ const FREE_PLAN_INVOICE_LIMIT = 1;
 export class InvoicesService {
   constructor(
     @InjectModel(Invoice.name) private invoiceModel: Model<InvoiceDocument>,
+    @InjectModel(InvoiceCounter.name) private invoiceCounterModel: Model<InvoiceCounterDocument>,
     @InjectModel(Agency.name) private agencyModel: Model<AgencyDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     private razorpayService: RazorpayService,
@@ -62,12 +64,8 @@ export class InvoicesService {
     const taxMinor = dto.taxMinor ?? 0;
     const totalMinor = Math.max(0, subtotalMinor - discountMinor + taxMinor);
 
-    const invoiceNumber = await this.nextInvoiceNumber(agencyId.toString());
+    const invoiceNumber = await this.nextInvoiceNumber(agencyId);
 
-    // Snapshot the customer's details as they are RIGHT NOW — see the
-    // CustomerSnapshot schema comment for why this must never be a live
-    // reference. Per-invoice overrides in dto.customer win over the client's
-    // profile defaults.
     const customer = {
       name: dto.customer?.name ?? client.name,
       company: dto.customer?.company ?? '',
@@ -94,10 +92,6 @@ export class InvoicesService {
       taxMinor,
       taxLabel: dto.taxLabel ?? '',
       totalMinor,
-      // A draft is invisible to the client and un-notified until explicitly
-      // sent via POST /invoices/:id/send. Without saveAsDraft, an invoice is
-      // visible/payable the moment it's created — there's no separate
-      // "send" step in that path — so 'sent' reflects what's actually true.
       status: dto.saveAsDraft ? 'draft' : 'sent',
       issueDate: dto.issueDate ? new Date(dto.issueDate) : new Date(),
       dueDate: new Date(dto.dueDate),
@@ -121,12 +115,6 @@ export class InvoicesService {
     return invoice;
   }
 
-  /**
-   * Transitions a draft invoice to sent — makes it visible to the client
-   * and fires the notification that creation skipped. Mirrors
-   * ContractsService.send()'s pattern for the same reason: a draft
-   * shouldn't announce itself until someone decides it's ready.
-   */
   async send(user: AuthenticatedUser, invoiceId: string) {
     const { agencyId } = scopeToTenant(user);
     const invoice = await this.invoiceModel.findOne({ _id: invoiceId, agencyId });
@@ -151,12 +139,6 @@ export class InvoicesService {
     return invoice;
   }
 
-  /**
-   * Lists invoices scoped to the caller: agency staff see every invoice
-   * (including drafts) for their tenant; a client sees only invoices
-   * addressed to them, and NEVER drafts — a draft doesn't exist for the
-   * client until it's explicitly sent.
-   */
   async findAll(user: AuthenticatedUser) {
     const { agencyId } = scopeToTenant(user);
     const filter: Record<string, unknown> = { agencyId };
@@ -182,12 +164,6 @@ export class InvoicesService {
     return invoice;
   }
 
-  /**
-   * Creates (or reuses) a Razorpay order for this invoice so the client can
-   * pay it. Reuses an existing order rather than creating a new one on every
-   * page load — Razorpay orders are immutable once created, and creating a
-   * fresh one each time would fragment payment history for the same invoice.
-   */
   async createPaymentOrder(user: AuthenticatedUser, invoiceId: string) {
     const invoice = await this.findOne(user, invoiceId);
 
@@ -226,35 +202,17 @@ export class InvoicesService {
     return { orderId: order.id, amount: invoice.totalMinor, currency: invoice.currency, keyId: this.razorpayService.keyId };
   }
 
-  /**
-   * Full professional invoice PDF — every section from the requested spec:
-   * business info, customer info, invoice meta, line items, subtotal,
-   * discount, tax, grand total, payment info, payment terms, and notes.
-   * Accessible to the client it belongs to AND any agency staff (owner,
-   * member, team head) — enforced by findOne()'s existing role check plus
-   * the controller having no additional @Roles() restriction on this route.
-   *
-   * Uses embedded Noto Sans (via fontkit) instead of the standard Helvetica
-   * font, because Helvetica's WinAnsi encoding cannot represent the ₹
-   * (Rupee) glyph produced by Intl.NumberFormat for INR amounts.
-   */
   async generatePdf(user: AuthenticatedUser, invoiceId: string): Promise<Buffer> {
     const invoice = await this.findOne(user, invoiceId);
     const agency = await this.agencyModel.findById(invoice.agencyId).lean();
 
     const pdfDoc = await PDFDocument.create();
-    pdfDoc.registerFontkit(fontkit); // required before embedFont() with a custom (non-standard) font
+    pdfDoc.registerFontkit(fontkit);
 
-    let page = pdfDoc.addPage([595, 842]); // A4 in points
+    let page = pdfDoc.addPage([595, 842]);
 
-    // Load Unicode-capable fonts that include the ₹ glyph.
-    // Place NotoSans-Regular.ttf / NotoSans-Bold.ttf under src/assets/fonts/
-    // and make sure your build copies that folder into dist/ (see nest-cli.json
-    // "assets" config), since __dirname at runtime points into dist/.
     const regularBytes = fs.readFileSync(path.join(__dirname, '../assets/fonts/NotoSans-Regular.ttf'));
     const font = await pdfDoc.embedFont(regularBytes);
-    // Using the same Regular weight for "bold" text for now — swap in a real
-    // NotoSans-Bold.ttf later if you want actual bold headings.
     const bold = await pdfDoc.embedFont(regularBytes);
 
     const margin = 48;
@@ -272,7 +230,6 @@ export class InvoicesService {
       page.drawText(text, { x, y, size, font: f, color });
     };
 
-    // ---- Business Information ----
     drawText(agency?.name ?? 'Invoice', margin, 20, bold);
     y -= 20;
     if (agency?.address) {
@@ -289,7 +246,6 @@ export class InvoicesService {
       y -= 13;
     }
 
-    // Invoice number / dates, right-aligned block
     const rightX = pageWidth - margin - 160;
     let rightY = 842 - margin;
     page.drawText(`Invoice ${invoice.invoiceNumber}`, { x: rightX, y: rightY, size: 13, font: bold });
@@ -312,7 +268,6 @@ export class InvoicesService {
 
     y -= 24;
 
-    // ---- Customer Information ----
     drawText('Billed to', margin, 10, bold, rgb(0.4, 0.44, 0.5));
     y -= 14;
     drawText(invoice.customer.name, margin, 11, bold);
@@ -333,7 +288,6 @@ export class InvoicesService {
 
     y -= 16;
 
-    // ---- Line items table ----
     const colDescX = margin;
     const colQtyX = margin + 300;
     const colPriceX = margin + 360;
@@ -373,7 +327,6 @@ export class InvoicesService {
     });
     y -= 20;
 
-    // ---- Totals block, right-aligned ----
     const totalsLabelX = margin + 340;
     const totalsValueX = margin + 440;
 
@@ -406,7 +359,6 @@ export class InvoicesService {
     drawText(money(invoice.totalMinor), totalsValueX, 12, bold);
     y -= 32;
 
-    // ---- Payment Information ----
     newPageIfNeeded(160);
     drawText('Payment information', margin, 10, bold, rgb(0.4, 0.44, 0.5));
     y -= 16;
@@ -429,7 +381,6 @@ export class InvoicesService {
 
     y -= 12;
 
-    // ---- Payment Terms ----
     if (invoice.paymentTerms || invoice.lateFeePolicy) {
       newPageIfNeeded(80);
       drawText('Payment terms', margin, 10, bold, rgb(0.4, 0.44, 0.5));
@@ -445,7 +396,6 @@ export class InvoicesService {
       y -= 12;
     }
 
-    // ---- Notes ----
     if (invoice.notes) {
       newPageIfNeeded(80);
       drawText('Notes', margin, 10, bold, rgb(0.4, 0.44, 0.5));
@@ -478,12 +428,20 @@ export class InvoicesService {
     return lines;
   }
 
-  // Count-then-format is good enough at agency scale (single-digit invoices
-  // created per day), but has a theoretical race under concurrent creates.
-  // If two agency members hit "create invoice" in the same millisecond,
-  // revisit with a per-agency counter document + findOneAndUpdate($inc).
-  private async nextInvoiceNumber(agencyId: string): Promise<string> {
-    const count = await this.invoiceModel.countDocuments({ agencyId });
-    return `INV-${String(count + 1).padStart(4, '0')}`;
+  /**
+   * Atomic per-agency counter — findOneAndUpdate + $inc is a single atomic
+   * operation at the MongoDB level, so concurrent invoice creations for the
+   * same agency can never collide on the same number (unlike the previous
+   * count-then-format approach, which had a read/write race).
+   * upsert: true means the very first invoice for an agency creates the
+   * counter document on the fly, starting at seq 1.
+   */
+  private async nextInvoiceNumber(agencyId: Types.ObjectId): Promise<string> {
+    const counter = await this.invoiceCounterModel.findOneAndUpdate(
+      { agencyId },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true },
+    );
+    return `INV-${String(counter.seq).padStart(4, '0')}`;
   }
 }

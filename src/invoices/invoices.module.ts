@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Invoice, InvoiceSchema } from '../schemas/invoice.schema';
+import { InvoiceCounter, InvoiceCounterSchema } from '../schemas/invoice-counter.schema';
 import { Agency, AgencySchema } from '../schemas/agency.schema';
 import { User, UserSchema } from '../schemas/user.schema';
 import { InvoicesService } from './invoices.service';
@@ -13,6 +14,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
   imports: [
     MongooseModule.forFeature([
       { name: Invoice.name, schema: InvoiceSchema },
+      { name: InvoiceCounter.name, schema: InvoiceCounterSchema },
       { name: Agency.name, schema: AgencySchema },
       { name: User.name, schema: UserSchema },
     ]),

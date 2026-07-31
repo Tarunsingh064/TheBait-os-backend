@@ -7,11 +7,14 @@ import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantGuard } from '../tenants/tenant.guard';
 import { SubscriptionGuard } from '../subscriptions/subscription.guard';
+import { UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @Controller('contracts')
 @UseGuards(TenantGuard,SubscriptionGuard)
 export class ContractsController {
   constructor(private contractsService: ContractsService) {}
+  
 
   @Post()
   @Roles('agency_owner', 'agency_member', 'agency_team_head')
@@ -36,15 +39,23 @@ export class ContractsController {
   }
 
   @Post(':id/sign')
-  @Roles('client')
-  sign(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body() dto: SignContractDto,
-    @Req() req: Request,
-  ) {
-    return this.contractsService.sign(user, id, dto, req.ip ?? 'unknown');
-  }
+@Roles('client')
+@UseInterceptors(FileInterceptor('signature'))
+sign(
+  @CurrentUser() user: AuthenticatedUser,
+  @Param('id') id: string,
+  @Body() dto: SignContractDto,
+  @Req() req: Request,
+  @UploadedFile() signature?: Express.Multer.File,
+) {
+  return this.contractsService.sign(
+    user,
+    id,
+    dto,
+    req.ip ?? 'unknown',
+    signature ? { buffer: signature.buffer, mimetype: signature.mimetype } : undefined,
+  );
+}
 
   @Get(':id/pdf')
   async downloadPdf(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Res() res: Response) {
