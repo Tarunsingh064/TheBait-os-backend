@@ -31,7 +31,7 @@ async function bootstrap() {
 
   const allowedOrigins = (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean);
    app.enableCors({
-    origin: process.env.CLIENT_URL?.split(',') ?? ['https://www.thebait.space/','https://the-bait-os-frontend.vercel.app','http://localhost:3000'],
+    origin: process.env.CLIENT_URL?.split(',') ?? ['https://www.thebait.space','https://the-bait-os-frontend.vercel.app','http://localhost:3000'],
     credentials: true,
     methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
