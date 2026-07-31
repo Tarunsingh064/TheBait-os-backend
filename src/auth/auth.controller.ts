@@ -30,7 +30,7 @@ const accessCookieOpts = {
   secure: isProd,
   sameSite: 'lax' as const,
   path: '/',
-  maxAge: 15 * 24 * 60 * 60 * 1000, // 15 min, mirrors access token TTL
+  maxAge: 15 * 24 * 60 * 60 * 1000, // 15 day, mirrors access token TTL
 };
 
 const refreshCookieOpts = {

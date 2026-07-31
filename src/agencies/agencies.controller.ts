@@ -1,4 +1,7 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body, Controller, Get, Patch, Post, UseGuards, UseInterceptors, UploadedFile,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AgenciesService } from './agencies.service';
 import { UpdateBusinessInfoDto } from './dto/update-business-info.dto';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
@@ -15,12 +18,19 @@ export class AgenciesController {
     return this.agenciesService.getMine(user);
   }
 
-  // Reuses BillingAccessGuard from the subscriptions module — bank details
-  // and payment links are the same sensitivity tier as billing, so the same
-  // owner-or-delegated-team-head rule applies here.
   @Patch('me')
   @UseGuards(BillingAccessGuard)
   updateMine(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateBusinessInfoDto) {
     return this.agenciesService.updateMine(user, dto);
+  }
+
+  @Post('me/logo')
+  @UseGuards(BillingAccessGuard)
+  @UseInterceptors(FileInterceptor('logo')) // 'logo' must match the form field name the client sends
+  uploadLogo(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.agenciesService.uploadLogo(user, file.buffer, file.mimetype);
   }
 }
