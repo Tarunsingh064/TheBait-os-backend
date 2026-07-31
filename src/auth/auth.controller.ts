@@ -29,6 +29,7 @@ const accessCookieOpts = {
   httpOnly: true,
   secure: isProd,
   sameSite: 'lax' as const,
+  domain: '.thebait.space',
   path: '/',
   maxAge: 15 * 24 * 60 * 60 * 1000, // 15 day, mirrors access token TTL
 };
@@ -37,6 +38,7 @@ const refreshCookieOpts = {
   httpOnly: true,
   secure: isProd,
   sameSite: 'lax' as const,
+  domain: '.thebait.space',
   path: '/api/auth', // must match the real request path, including the global 'api' prefix set in main.ts
   maxAge: 30 * 24 * 60 * 60 * 1000,
 };
